@@ -191,7 +191,52 @@ function Wave.GetWaveHeight(self, Position: Vector3, Settings)
 	if sc then
 		return rt
 	else
-		-- Error handling code for calculating wave height based on position approximation
+		------------- return a gerstner sampled, which is not accurate but better than nothing atleast.
+		
+		local XMin, XMax = GetXPlacement(Position)
+		local ZMin, ZMax = GetZPlacement(Position)
+
+		local X = XMax * DistanceBetweenBones;
+		local Z = ZMax * DistanceBetweenBones;
+
+		local NewPosition = Vector3.new(X, 0, Z);
+		--markerUltilizer.Position = NewPosition
+		
+		local Offset = Position - NewPosition;
+		local Row0, Row1 = GetRowRange(Offset)
+		local Column0, Column1 = GetColumnRange(Offset)
+		
+		local PointF = ConvertToVector2(Position)
+		local Triangle;
+		
+		local bone1 = Vector3.new((Column0 - OffsetCount) * DistanceBetweenBones, 0, (Row0 - OffsetCount) * DistanceBetweenBones) + NewPosition
+		local bone2 = Vector3.new((Column0 - OffsetCount) * DistanceBetweenBones, 0, (Row1 - OffsetCount) * DistanceBetweenBones) + NewPosition
+		local bone3 = Vector3.new((Column1 - OffsetCount) * DistanceBetweenBones, 0, (Row0 - OffsetCount) * DistanceBetweenBones) + NewPosition
+		local bone4 = Vector3.new((Column1 - OffsetCount) * DistanceBetweenBones, 0, (Row1 - OffsetCount) * DistanceBetweenBones) + NewPosition
+		local triangles = {
+			{bone1, bone2, bone3}, {bone2, bone3, bone4}
+		}
+		local PointA = ConvertToVector2(bone1);
+		local PointB = ConvertToVector2(bone2);
+		local PointC = ConvertToVector2(bone3);
+		
+		if isPointInTriangle(PointF, PointA, PointB, PointC) then
+			Triangle = triangles[1];
+		else
+			Triangle = triangles[2];
+		end
+		
+		local _time = (DateTime.now().UnixTimestampMillis/1000)/Settings.TimeModifier;
+		local Transform1 = Gerstner(Triangle[1] ,Settings.WaveLength,Settings.Direction,Settings.Steepness,Settings.Gravity,_time) + Vector3.new(0, SeaData.SeaLevel, 0) + Triangle[1];
+		local Transform2 = Gerstner(Triangle[2] ,Settings.WaveLength,Settings.Direction,Settings.Steepness,Settings.Gravity,_time) + Vector3.new(0, SeaData.SeaLevel, 0) + Triangle[2];
+		local Transform3 = Gerstner(Triangle[3] ,Settings.WaveLength,Settings.Direction,Settings.Steepness,Settings.Gravity,_time) + Vector3.new(0, SeaData.SeaLevel, 0) + Triangle[3];
+		
+		--p1.Position = Transform1
+		--p2.Position = Transform2
+		--p3.Position = Transform3
+		
+		local r1 = ProjectToPlane(Position, Transform1, Transform2, Transform3)
+		return r1
 	end
 end
 
