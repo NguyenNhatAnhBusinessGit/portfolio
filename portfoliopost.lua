@@ -1,258 +1,330 @@
---|| Hello, once again, this is for my portfolio, I'm OriChanRBLX, discord is gaaaaaaaaaa! This script is the Registry module, which is used as a part of my existing combat system ||--
---|| Purposes: This serves as a damage manager script, as Registry:Hit() can be used to damage a player gping through alot of procedures such as Block Checking, Damage Invunerable, Rig Availablity, ... ||--
+--|| Hello, once again, this is for my portfolio, I'm OriChanRBLX, discord is gaaaaaaaaaa! This script is the Wave module, which is a mesh deformation ocean formula ||--
 
---|| The first few lines are for variables, which are for easy access and usage in the script later below ||--
+-- Define a new table Wave and set its metatable to itself
+local Wave = {}
+Wave.__index = Wave -- Enables object-oriented behavior
 
---||Services||--
-local Players = game:GetService("Players")
+-- Define shortcuts for frequently used methods and classes to improve performance
+local newCFrame = CFrame.new
+local IdentityCFrame = newCFrame() -- Identity matrix for resetting transformations
+local EmptyVector2 = Vector2.new()
+local math_noise = math.noise
+local random = math.random
+local setseed = math.randomseed
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
+-- Service shortcuts for Roblox game components
+local Stepped = game:GetService("RunService").RenderStepped
+local Player = game:GetService("Players").LocalPlayer
 
-local Debris = game:GetService("Debris")
+-- Import Sea data from a shared module for sea-level settings
+local SeaData = require(game.ReplicatedStorage.MODULES.Sea)
 
---|| Directories ||--
-local Remotes = ReplicatedStorage.Remotes
+-- Define default values for wave properties
+local default = {
+	WaveLength = 85,            -- Length of wave
+	Gravity = 1.5,              -- Gravity factor affecting wave motion
+	Direction = Vector2.new(1, 0), -- Initial wave direction as a Vector2
+	FollowPoint = nil,          -- Optional reference point for direction control
+	Steepness = 1,              -- Wave steepness factor
+	TimeModifier = 4,           -- Modifies time passage for wave simulation speed
+	MaxDistance = 1500,         -- Max distance where wave effects apply
+}
 
-local COMBAT = ReplicatedStorage.Remotes.COMBAT
-local MODULES = ReplicatedStorage.MODULES
-local STATE = require(MODULES.Shared.STATE)
-local DATA = require(ServerScriptService.COMBAT.Preset.DATA)
-local PLAYERDATA = require(ServerScriptService.COMBAT.Preset.PLAYER)
-local AnimationManager = require(MODULES.Utility.AnimationManager)
-
-local ServerStorage = game:GetService("ServerStorage")
-local VFX = require(ServerStorage.EncryptedModules.VFXManager)
-
-local SpeedManager = require(MODULES.Shared.Speed)
-
-local Initiate = ReplicatedStorage.Remotes.Visual.Initiate
-
---||We define the module, as wrapping a self named "Registry" and return it by the end of the script. This "self" will store all the functions we can pass on when requiring. ||--
-local Registry = {}
-Registry.Burn = {}
-
---||Burn is a special table which will store data for Registry:Burn() function below||--
-
-local function Damage(Victim, Damage, Data, Callback)
-	--|| We will do several check to ensure the passed character can receive damage ||--
-	--|| First check if the passed character is defined, not nil. Then, we will find the Victim's Humanoid and their HumanoidRootPart ||--
-
-	--|| More checks are managed, as if they have Forcefield protection, if they are knocked (In my game, they need to be gripped to die, or else they will ragdoll til recovery and this is called the Knocked state), check if they are in Live folder for valid parent ||--
-	--|| STATE:LOADPRESET() is a special function, since Victim who are registered by this module will store all their state like (UsingAbiliities, Running,...), LOADPRESET() will together check if all these state are in valid condition, return true if all are valid ||--
-	
-	if not Victim then return end 
-	
-	local VHumanoid: Humanoid, VRoot = Victim:FindFirstChild("Humanoid"), Victim:FindFirstChild("HumanoidRootPart")
-	
-	if (Victim:FindFirstChild("Forcefield")) then return end
-	if (VHumanoid.Parent:FindFirstChild("Knocked")) then return end
-	if (VHumanoid.Parent.Parent ~= workspace.World.Live) then return end
-	if not STATE:LOADPRESET(Victim, "Damagable") then return end
-
-	--|| After all checks, the character will be damaged by Humanoid:TakeDamage() function ||--
-	
-	VHumanoid:TakeDamage(Damage)
-	
-	if not Data.DisableIndicator then
-		--|| Data is a box of information, if DisableIndicator is not enabled, then DamageIndication is requested to be replicated through :FireAllClients() with data ||--
-		Initiate:FireAllClients({Module = "Universal",Function = "DamageIndication",Information = {Victim = Victim, Damage = Damage}})
-	end
-	
-	if Data.Player then
-		--|| If Player is passed through, HitRegister will serve to replicate the total damage display on the client for the person who cause the damage ||--
-		ReplicatedStorage.Remotes.Replicator.HitRegister:FireClient(Data.Player, Damage)
-	end
-
-	--|| If the damage is not indirect, destroy the running state || --
-	if not Data.Indirect then
-		if Victim:FindFirstChild("Running") then
-			pcall(function()
-				Victim:FindFirstChild("Running"):Destroy()
-			end)
-		end
-	end
-
-	--|| If Victim is an AI, catch it's attention || --
-	if Victim:FindFirstChild("AISignal") then
-		Victim.AISignal:Fire({Name = "Attention", Subject = Data.Player})
-	end
-
-	--|| If the damage can cause instant grip, check if the damage can take user health to below or equal zero, if it does, grip them || --
-	if Data.InstantGrip then
-		print('yes instant grip')
-		if VHumanoid.Health - Damage <= 0 then
-			print('death')
-			pcall(function()
-				Victim.Parent = workspace
-			end);
-
-			if Players:GetPlayerFromCharacter(Victim) then
-				Remotes.OnDeath:Fire(Players:GetPlayerFromCharacter(Victim))
-			end;
-
-			VFX:CastAll("Universal", "OnDeath", {Rig = Victim})
-		end
-	end
-
-	--|| Run the callback on damage succeeded, this can be a function which do knockback, or whatsoever. || --
-	--|| Wrapped in pcall() so if Callback is not passed, or Callback cause an error, the code below can still run || --
-	pcall(function()
-		Callback()
-	end)
-
-	--|| Cancel Gripping or Carrying State on damage, first to check if there are events for them, if it does, fire it and pass a value "Execute" which indicate cancelation. || --
-	if (Victim:FindFirstChild("Gripping")) then
-		local GripEvent = Victim:FindFirstChild("Gripping")
-		if not GripEvent:IsA("BindableFunction") then return end
-
-		local Type, Entity = GripEvent:Invoke("Return"); if Type ~= "Attacker" then return end
-
-		GripEvent:Invoke("Execute")
-	end
-	if (Victim:FindFirstChild("Carrying")) then
-		local GripEvent = Victim:FindFirstChild("Carrying")
-		if not GripEvent:IsA("BindableFunction") then return end
-
-		local Type, Entity = GripEvent:Invoke("Return"); if Type ~= "Attacker" then return end
-
-		GripEvent:Invoke("Execute")
-	end
+-- Projects a vector vertically onto a plane
+local function ProjectVertically(vec, p, n)
+	local off = vec - p
+	local y = -(n.X * off.X + n.Z * off.Z) / n.Y
+	return p + Vector3.new(off.X, y, off.Z)
 end
 
---|| ThirdPartyDamage instantly call Damage() function, not expecting any Blocking or Parry check. || --
-function Registry:ThirdPartyDamage(Victim, Data: {Damage: number, InstantGrip: boolean, DisableIndicator: boolean})
-	Damage(Victim, Data.Damage, Data)
+-- Projects a position onto a 3D plane defined by three points
+local function ProjectToPlane(pos, a, b, c)
+	local ab, bc = b - a, c - b
+	local n = ab:Cross(bc).Unit -- Get normal vector of the plane
+	if n.Y < 0 then n = -n end -- Ensure normal vector points upward
+	return ProjectVertically(pos, a, n)
 end
 
---|| Registry:ApplyBurn() is wrapped in a spawn() so the wait loop won't yield the script calling. || --
-function Registry:ApplyBurn(Victim, Data)
-	--|| Version is served to prevent burn stacking, proper ID will be passed to control the current burn version, so newer will be prioritized and old burn called will be cancelled || --
-	spawn(function()
-		local Interval = Data.Interval
-		local Duration = Data.Duration
-		local ID = Data.ID
+-- Organizes objects into a grid based on their Z and X positions
+local function Gridify(objects, cols: number)
+	table.sort(objects, function(a, b) return a.Position.Z < b.Position.Z end) -- Sort by Z position
 
-		local V_ersion = 0
-
-		if ID then
-			if Registry.Burn[ID] then
-				Registry.Burn[ID] += 1
-				V_ersion = Registry.Burn[ID]
-			else
-				Registry.Burn[ID] = 0
-				V_ersion = Registry.Burn[ID]
-			end
-		end
-
-		task.wait()
-
-		--|| I could have used for loop with time distribution but this is my old code so.., I used them in newer version! || --
-		local StartTime = tick()
-		while true do
-			if tick() - StartTime > Duration then break end
-
-			if ID then
-				if Registry.Burn[ID] then
-					if Registry.Burn[ID] ~= V_ersion then break end
-				end
-			end
-
-			Damage(Victim, Data.Damage, Data, nil)
-
-			wait(Interval)
-		end
-	end)
-end 
-
---|| Create a Parry event, the Parry event will be checked when going through Registry:Hit() || --
-function Registry:CreateParry(Character, Duration)
-	local Parry = Instance.new("BindableEvent")
-	Parry.Name = "Parry"
-	Parry.Parent = Character
-	Debris:AddItem(Parry, Duration)
-	--|| Debris usage || --
-
-	--|| On event, the parry will be destroyed, as well as providing 0.2 seconds of IFrame to both characters|| --
-	Parry.Event:Connect(function(Victim)
-		if not Victim:FindFirstChild("Parry") then return end
-		Parry:Destroy()
-		Victim.Parry:Destroy()
-		
-		--AnimationManager.Play(Character, ReplicatedStorage.Animations.Motion.ParryFists, true)
-		--AnimationManager.Play(Victim, ReplicatedStorage.Animations.Motion.ParryFists, true)
-		
-		STATE:SET("IFrame", 0.2, Character)
-		STATE:SET("IFrame", 0.2, Victim)
-	end)
+	local grid = {}
+	for row = 1, #objects / cols do
+		local lowerIndex = 1 + (row - 1) * cols
+		local upperIndex = row * cols
+		local thisRow = {}
+		table.move(objects, lowerIndex, upperIndex, 1, thisRow)
+		table.sort(thisRow, function(a, b) return a.Position.X < b.Position.X end) -- Sort by X position
+		grid[row] = thisRow
+	end
+	return grid
 end
 
---|| Most used, fundamental function of the script, Registry:Hit() is a primary way to call a damage casting on a registered character || --
-function Registry:Hit(Character, Victim, Data, Callback)
-	--|| Check if Character, Victim, Data table are passed correctly || --
-	if not Character then return end
-	if not Victim then return end
-	if not Data then return end
+-- Computes Gerstner wave displacement for realistic water waves
+local function Gerstner(Position: Vector3, Wavelength: number, Direction: Vector2, Steepness: number, Gravity: number, Time: number)
+	local k = (2 * math.pi) / Wavelength -- Wave number
+	local a = Steepness / k             -- Wave amplitude
+	local d = Direction.Unit
+	local c = math.sqrt(Gravity / k)     -- Wave speed
+	local f = k * d:Dot(Vector2.new(Position.X, Position.Z)) - c * Time
+	local cosF = math.cos(f)
 
-	--|| Check if Data.Damage is defined since its essential, as well as a check that ensure both are not in Safe Zone || --
-	if not Data.Damage then warn("Damage field is required!") return end
-	if Victim:FindFirstChild("Safe Zone") or Character:FindFirstChild("Safe Zone") then return end
+	-- Calculate displacement in X, Y, and Z
+	local dX = (d.X * (a * cosF))
+	local dY = a * math.sin(f)
+	local dZ = (d.Y * (a * cosF))
+	return Vector3.new(dX, dY, dZ)
+end
 
-	--|| Find essential parts of both characters, such as Humanoid and HumanoidRootPart. If they don't exzsts, cancel the function call || --
-	local Humanoid, HumanoidRootPart = Character:FindFirstChild("Humanoid"), Character:FindFirstChild("HumanoidRootPart")
-	local VHumanoid, VRoot = Victim:FindFirstChild("Humanoid"), Victim:FindFirstChild("HumanoidRootPart")
-	if not Humanoid then return end
-	if not HumanoidRootPart then return end
-	if not VHumanoid then return end
-	if not VRoot then return end
+-- Creates and returns new settings based on defaults and custom values
+local function CreateSettings(s: table, o: table)
+	o = o or {}
+	s = s or default
+	local new = {
+		WaveLength = s.WaveLength or o.WaveLength or default.WaveLength,
+		Gravity = s.Gravity or o.Gravity or default.Gravity,
+		Direction = s.Direction or o.Direction or default.Direction,
+		PushPoint = s.PushPoint or o.PushPoint or default.PushPoint,
+		Steepness = s.Steepness or o.Steepness or default.Steepness,
+		TimeModifier = s.TimeModifier or o.TimeModifier or default.TimeModifier,
+		MaxDistance = s.MaxDistance or o.MaxDistance or default.MaxDistance,
+	}
+	return new
+end
 
-	--|| Set Data.Player to Player if they exists, so it will pass through Hit() afterward, we have discussed the functionality of this earlier || --
-	local Player = game.Players:GetPlayerFromCharacter(Character)
-	Data.Player = Player
+-- Checks if a point is within a triangle using barycentric coordinates
+function isPointInTriangle(f, a, b, c)
+	local v0 = c - a
+	local v1 = b - a
+	local v2 = f - a
 
-	--|| If victim has Perfect Block and both characters is facing, cast a perfect block stun on character who making attack.|| --
-	if Victim:FindFirstChild("Perfect Block") and not (VRoot.CFrame.LookVector:Dot((HumanoidRootPart.Position - VRoot.Position).Unit) < 0) then
-		--|| Set the speed of humanoid so they cant move, as well as set stun state so they cant do anything. PB animation is managed by AnimationManagerService, and PB VFX is casted to replicate at position forward victim || --
-			
-		SpeedManager.Set(Character, 0, 1.75, 10)
-		STATE:SET("Stun", 1.75, Character)
-		AnimationManager.Play(Character, ReplicatedStorage.Animations.Motion.PerfectBlock, true)
-		
-		VFX:CastAll("Universal", "Perfect Block", {Position = (VRoot.CFrame * CFrame.new(0, 0, -2)).p})
-		
-	elseif Victim:FindFirstChild("Blocking") then
-		--|| If victim is blocking, first check if they are facing, if they are not facing, then damage because its a indirect hit. Else, check if the block ran out, if it does, cast block break and damage, else, just subtract one block || --
-		--|| VFX Cast are followed by such as BlockHit, Guardbreak VFX replicated on client || --
-		if VRoot.CFrame.LookVector:Dot((HumanoidRootPart.Position - VRoot.Position).Unit) < 0 then
-			Data.Root = HumanoidRootPart
-			Damage(Victim, Data.Damage, Data, Callback)
+	local dot00 = v0:Dot(v0)
+	local dot01 = v0:Dot(v1)
+	local dot02 = v0:Dot(v2)
+	local dot11 = v1:Dot(v1)
+	local dot12 = v1:Dot(v2)
+
+	local invDenom = 1 / (dot00 * dot11 - dot01 * dot01)
+	local u = (dot11 * dot02 - dot01 * dot12) * invDenom
+	local v = (dot00 * dot12 - dot01 * dot02) * invDenom
+
+	return (u >= 0) and (v >= 0) and (u + v <= 1)
+end
+
+-- Gets wave direction based on either preset direction or a push point
+local function GetDirection(Settings, WorldPos)
+	local Direction = Settings.Direction
+	local PushPoint = Settings.PushPoint
+
+	if PushPoint then
+		local PartPos = nil
+		if PushPoint:IsA("Attachment") then
+			PartPos = PushPoint.WorldPosition
+		elseif PushPoint:IsA("BasePart") then
+			PartPos = PushPoint.Position
 		else
-			local Block = Victim:FindFirstChild("Blocking")
-			if Block.Value - 1 < 1 or Data.BreakBlock then
-				pcall(function()
-					Block:Destroy()
-				end)
-				
-				SpeedManager.Set(Victim, 0, 2.33, 10)
-				AnimationManager.Play(Victim, ReplicatedStorage.Animations.Motion.Guardbreak, true)
-				STATE:SET("Stun", 2.33, Victim)
-				
-				VFX:CastAll("Universal", "Guardbreak", {Position = (VRoot.CFrame * CFrame.new(0, 0, -2)).p})
-				
-				Data.Root = HumanoidRootPart
-				Damage(Victim, Data.Damage, Data, Callback)
-			else
-				AnimationManager.Play(Victim, ReplicatedStorage.Animations.Motion.BlockHit, true)
-				
-				VFX:CastAll("Universal", "BlockHit", {Position = (VRoot.CFrame * CFrame.new(0, 0, -2)).p})
-				
-				Block.Value = Block.Value - 1
-			end
+			warn("Invalid class for FollowPart, must be BasePart or Attachment")
+			return
 		end
+		Direction = (PartPos - WorldPos).Unit
+		Direction = Vector2.new(Direction.X, Direction.Z)
+	end
+	return Direction
+end
+
+-- The rest of the functions handle different utility calculations and bone grid placements
+-- Some functions are specifically for retrieving X and Z placement ranges based on position
+
+-- Creates visual markers for wave height tracking (used for debugging or visualization)
+local CreateMiscVisual = function()
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.Name = "Visualizer"
+	p.Size = Vector3.new(5, 5, 5)
+	p.Color = Color3.fromRGB(255, 0, 0)
+	p.Material = Enum.Material.Neon
+	p.CanCollide = false
+	p.Parent = workspace
+	return p
+end
+
+-- The main function for calculating wave height using bone positions and Gerstner wave calculations
+function Wave.GetWaveHeight(self, Position: Vector3, Settings)
+	-- Attempt to find the height of the wave at a specific position and apply wave transformations
+	local sc, rt = pcall(function()
+		Position = XZVector3(Position)
+		local Direction = Settings.Direction
+		local PointF = ConvertToVector2(Position)
+		local Triangle
+		local Grid = self._bones_grid
+		local Offset = Position - self._instance.Position
+		local Row0, Row1 = GetRowRange(Offset)
+		local Column0, Column1 = GetColumnRange(Offset)
+
+		if not Row0 then return end
+		if not Row1 then return end
+		if not Column0 then return end
+		if not Column1 then return end
+
+		-- Retrieve grid-based bone information and calculate wave height at the specified position
+		local bone1 = Grid[Row0][Column0]
+		local bone2 = Grid[Row0][Column1]
+		local bone3 = Grid[Row1][Column0]
+		local bone4 = Grid[Row1][Column1]
+		local triangles = {{bone1, bone2, bone3}, {bone2, bone3, bone4}}
+		local PointA = ConvertToVector2(triangles[1][1].WorldPosition)
+		local PointB = ConvertToVector2(triangles[1][2].WorldPosition)
+		local PointC = ConvertToVector2(triangles[1][3].WorldPosition)
+		if isPointInTriangle(PointF, PointA, PointB, PointC) then
+			Triangle = triangles[1]
+		else
+			Triangle = triangles[2]
+		end
+
+		local r1 = ProjectToPlane(Position, Triangle[1].TransformedWorldCFrame.Position, Triangle[2].TransformedWorldCFrame.Position, Triangle[3].TransformedWorldCFrame.Position)
+		return r1
+	end)
+
+	-- Calculate fallback position if above attempt fails
+	if sc then
+		return rt
 	else
-		Data.Root = HumanoidRootPart
-		Damage(Victim, Data.Damage, Data, Callback)
+		-- Error handling code for calculating wave height based on position approximation
 	end
 end
 
-return Registry
+-- Initializes a new Wave object with given instance, settings, and bones (wave control points)
+function Wave.new(instance: instance, waveSettings: table | nil, bones: table | nil)
+	-- Sets up bones and grid representation for wave mechanics
+	-- Get bones on our own
+	if bones == nil then
+		bones = {}
+		for _,v in pairs(instance:GetDescendants()) do
+			if v:IsA("Bone") then
+				table.insert(bones,v)
+			end
+		end
+	end
+
+	local Time = os.time()
+
+	local triangles = {}
+	local boneGrids = Gridify(bones, 22);
+	for i, row in pairs(boneGrids) do
+		local nextRow = boneGrids[i + 1];
+		if not nextRow then continue end
+		for i1, bone in pairs(row)  do
+			local nextBone = row[i1 + 1];
+			if not nextBone then continue end
+
+			local corner1 = row[i1];
+			local corner2 = row[i1 + 1];
+			local corner3 = boneGrids[i + 1][i1];
+			local corner4 = boneGrids[i + 1][i1 + 1];
+			if not corner1 then continue end
+			if not corner2 then continue end
+			if not corner3 then continue end
+			if not corner4 then continue end
+
+			table.insert(triangles, {corner1, corner3, corner4});
+			table.insert(triangles, {corner2, corner1, corner4});
+		end
+	end
+
+	--------------------------------
+
+	return setmetatable({
+		_instance = instance,
+		_bones = bones,
+		_time = 0,
+		_connections = {},
+		_noise = {},
+		_bones_grid = boneGrids,
+		_triangles = triangles,
+		_settings = CreateSettings(waveSettings)
+	},Wave)
+end
+
+-- Periodically updates wave bones based on time and Gerstner wave transformations
+function Wave:Update()
+	for _,v in pairs(self._bones) do
+		-- Code for applying Perlin noise or direction based on settings and updating bone transforms
+		local WorldPos = v.WorldPosition
+		local Settings = self._settings
+		local Direction = Settings.Direction
+
+		if Direction == EmptyVector2 then
+			-- Use Perlin Noise
+			local Noise = self._noise[v]
+			local NoiseX = Noise and self._noise[v].X
+			local NoiseZ = Noise and self._noise[v].Z
+			local NoiseModifier = 3 -- If you want more of a consistent direction, change this number to something bigger
+
+			Directions[v] = Noise;
+
+			if not Noise then
+				self._noise[v] = {}
+				-- Uses perlin noise to generate smooth transitions between random directions in the waves
+				NoiseX = math_noise(WorldPos.X/NoiseModifier,WorldPos.Z/NoiseModifier,1)
+				NoiseZ = math_noise(WorldPos.X/NoiseModifier,WorldPos.Z/NoiseModifier,0)
+
+				self._noise[v].X = NoiseX
+				self._noise[v].Z = NoiseZ
+			end
+
+			Direction = Vector2.new(NoiseX,NoiseZ)
+		else
+			Direction = GetDirection(Settings,WorldPos)
+		end
+
+		v.Transform = newCFrame(Gerstner(WorldPos,Settings.WaveLength,Direction,Settings.Steepness,Settings.Gravity,self._time))
+	end
+end
+
+function Wave:Refresh()
+	for _,v in pairs(self._bones) do
+		v.Transform = IdentityCFrame
+	end
+end
+
+function Wave:UpdateSettings(waveSettings)
+	self._settings = CreateSettings(waveSettings,self._settings)
+end
+
+function Wave:ConnectRenderStepped()
+	local Connection = Stepped:Connect(function()
+		if not game:IsLoaded() then return end
+		local Character = Player.Character
+		local Settings = self._settings
+		pcall(function()
+			local InBoundsRange = (Character.PrimaryPart.Position-self._instance.Position).Magnitude < Settings.MaxDistance
+			InBoundsRange = InBoundsRange or (workspace.CurrentCamera.CFrame.Position-self._instance.Position).Magnitude < Settings.MaxDistance
+			
+			if not Character or InBoundsRange then
+				local Time = (DateTime.now().UnixTimestampMillis/1000)/Settings.TimeModifier
+				self._time = Time
+				self:Update()
+			else
+				self:Refresh()
+			end
+		end)
+	end)
+	table.insert(self._connections,Connection)
+	return Connection
+end
+
+function Wave:Destroy()
+	self._instance = nil
+	for _,v in pairs(self._connections) do
+		pcall(function()
+			v:Disconnect()
+		end)
+	end
+	self._bones = {}
+	self._settings = {}
+	self = nil
+	-- Basically makes the wave impossible to use
+end
+
+return Wave
