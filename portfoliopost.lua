@@ -1,4 +1,5 @@
 --|| Hello, once again, this is for my portfolio, I'm OriChanRBLX, discord is gaaaaaaaaaa! This script is the Wave module, which is a mesh deformation ocean formula ||--
+-- This script will uses Gerstner wave formula on bones of deformed mesh to create a custom ocean. The hard part is to find wave height, which have been processed by getting sample of triangles and bones around the position.
 
 -- Define a new table Wave and set its metatable to itself
 local Wave = {}
