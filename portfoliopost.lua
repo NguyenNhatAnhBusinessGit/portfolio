@@ -1,6 +1,46 @@
 --|| OriChanRBLX's Wave Module - A portfolio piece demonstrating Gerstner wave simulation on deformed mesh bones to create a custom ocean ||--
 -- This script uses the Gerstner wave formula on bones to simulate ocean movement. Core functionality includes calculating wave height by sampling triangles and nearby bones.
 
+-- This code simulates a wave effect using Gerstner wave principles. The wave height is calculated based on a grid of "bones" (control points that can be transformed) using trigonometric transformations. Here's a breakdown of how it works:
+
+-- Key Components of the Code
+-- Wave.GetWaveHeight:
+
+-- Calculates the height of a wave at a specific position.
+-- Uses a grid of bones as the wave’s base structure, divided into triangles.
+-- Determines which triangle contains the position in question, then uses Gerstner wave functions to simulate the wave's height at that position.
+-- If the first method of determining wave height fails, it falls back on an approximation that adjusts based on surrounding grid cells.
+-- Wave.new:
+
+-- Initializes a new Wave object with given settings and bones.
+-- The bones are found and structured into a grid, which will be used to calculate the wave surface.
+-- The wave "surface" is represented by triangles created between four adjacent bones in the grid. These triangles form the basis for determining wave height at any point.
+
+
+-- Key Calculations and Concepts
+-- Gerstner Wave Calculations:
+
+-- Gerstner waves simulate ocean waves realistically by displacing points along both the vertical and horizontal axes.
+-- Each bone in the grid is displaced based on wave parameters like steepness, wavelength, and direction.
+-- Over time, this displacement changes based on the TimeModifier, creating a rolling wave effect.
+-- Grid and Triangular Surface Representation:
+
+-- The grid of bones is divided into small triangles, which makes the wave calculation manageable by localizing calculations to smaller areas.
+-- By calculating the height of each triangle, the wave can respond to specific points more accurately.
+-- Summary of Execution Flow
+-- Initialize the Wave:
+
+-- The wave is initialized with bones, which form the surface grid.
+-- Continuous Update:
+
+-- In each frame, the Update function recalculates each bone’s position based on Gerstner wave equations, making the wave move realistically.
+-- Dynamic Settings:
+
+-- UpdateSettings and ConnectRenderStepped allow real-time adjustments and optimizations. The wave will stop updating when the player moves far enough away, reducing computational load.
+-- Cleanup:
+
+-- Destroy is called when the wave object is no longer needed, releasing memory and resources.
+
 -- Create Wave table and enable object-oriented behavior through metatable setup
 local Wave = {}
 Wave.__index = Wave 
