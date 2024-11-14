@@ -63,126 +63,159 @@ local SeaData = require(game.ReplicatedStorage.MODULES.Sea)
 
 -- Default wave properties
 local default = {
-    WaveLength = 85,              -- Controls wavelength
-    Gravity = 1.5,                -- Gravity affecting wave speed
-    Direction = Vector2.new(1, 0),-- Default direction vector
-    FollowPoint = nil,            -- Optional point to direct wave towards
-    Steepness = 1,                -- Steepness factor affecting wave height
-    TimeModifier = 4,             -- Speed of wave animation over time
-    MaxDistance = 1500,           -- Max effective distance for waves
+	WaveLength = 85,              -- Controls wavelength
+	Gravity = 1.5,                -- Gravity affecting wave speed
+	Direction = Vector2.new(1, 0),-- Default direction vector
+	FollowPoint = nil,            -- Optional point to direct wave towards
+	Steepness = 1,                -- Steepness factor affecting wave height
+	TimeModifier = 4,             -- Speed of wave animation over time
+	MaxDistance = 1500,           -- Max effective distance for waves
 }
 
 -- Projects a vector vertically to simulate wave height impact on the y-axis
 local function ProjectVertically(vec, p, n)
-    local off = vec - p
-    local y = -(n.X * off.X + n.Z * off.Z) / n.Y
-    return p + Vector3.new(off.X, y, off.Z)
+	local off = vec - p
+	local y = -(n.X * off.X + n.Z * off.Z) / n.Y
+	return p + Vector3.new(off.X, y, off.Z)
 end
 
 -- Projects position onto a plane defined by three points, to simulate water level changes
 local function ProjectToPlane(pos, a, b, c)
-    local ab, bc = b - a, c - b
-    local n = ab:Cross(bc).Unit -- Normal vector for the plane
-    if n.Y < 0 then n = -n end  -- Ensures upward orientation
-    return ProjectVertically(pos, a, n)
+	local ab, bc = b - a, c - b
+	local n = ab:Cross(bc).Unit -- Normal vector for the plane
+	if n.Y < 0 then n = -n end  -- Ensures upward orientation
+	return ProjectVertically(pos, a, n)
 end
 
 -- Converts a list of objects into a grid based on Z and X positions, useful for organizing wave effect areas
 local function Gridify(objects, cols: number)
-    table.sort(objects, function(a, b) return a.Position.Z < b.Position.Z end) -- Sort by Z-axis for rows
-    local grid = {}
-    for row = 1, #objects / cols do
-        local lowerIndex = 1 + (row - 1) * cols
-        local upperIndex = row * cols
-        local thisRow = {}
-        table.move(objects, lowerIndex, upperIndex, 1, thisRow)
-        table.sort(thisRow, function(a, b) return a.Position.X < b.Position.X end) -- Sort row by X-axis
-        grid[row] = thisRow
-    end
-    return grid
+	table.sort(objects, function(a, b) return a.Position.Z < b.Position.Z end) -- Sort by Z-axis for rows
+	local grid = {}
+	for row = 1, #objects / cols do
+		local lowerIndex = 1 + (row - 1) * cols
+		local upperIndex = row * cols
+		local thisRow = {}
+		table.move(objects, lowerIndex, upperIndex, 1, thisRow)
+		table.sort(thisRow, function(a, b) return a.Position.X < b.Position.X end) -- Sort row by X-axis
+		grid[row] = thisRow
+	end
+	return grid
 end
 
 -- Gerstner wave formula to create realistic wave displacement on the mesh
 local function Gerstner(Position: Vector3, Wavelength: number, Direction: Vector2, Steepness: number, Gravity: number, Time: number)
-    local k = TAU / Wavelength            -- Wave number, relates to wave length
-    local a = Steepness / k               -- Wave amplitude based on steepness
-    local d = Direction.Unit              -- Normalized direction vector for consistency
-    local c = math.sqrt(Gravity / k)      -- Wave speed derived from gravity and wave number
-    local f = k * d:Dot(Vector2.new(Position.X, Position.Z)) - c * Time
-    local cosF = math.cos(f)
+	local k = TAU / Wavelength            -- Wave number, relates to wave length
+	local a = Steepness / k               -- Wave amplitude based on steepness
+	local d = Direction.Unit              -- Normalized direction vector for consistency
+	local c = math.sqrt(Gravity / k)      -- Wave speed derived from gravity and wave number
+	local f = k * d:Dot(Vector2.new(Position.X, Position.Z)) - c * Time
+	local cosF = math.cos(f)
 
-    -- Displacement vectors for wave movement in 3D space
-    local dX = (d.X * (a * cosF))
-    local dY = a * math.sin(f)
-    local dZ = (d.Y * (a * cosF))
-    return Vector3.new(dX, dY, dZ)
+	-- Displacement vectors for wave movement in 3D space
+	local dX = (d.X * (a * cosF))
+	local dY = a * math.sin(f)
+	local dZ = (d.Y * (a * cosF))
+	return Vector3.new(dX, dY, dZ)
 end
 
 -- Combines default and custom settings to create a new settings table
 local function CreateSettings(s: table, o: table)
-    o = o or {}
-    s = s or default
-    local new = {
-        WaveLength = s.WaveLength or o.WaveLength or default.WaveLength,
-        Gravity = s.Gravity or o.Gravity or default.Gravity,
-        Direction = s.Direction or o.Direction or default.Direction,
-        PushPoint = s.PushPoint or o.PushPoint or default.PushPoint,
-        Steepness = s.Steepness or o.Steepness or default.Steepness,
-        TimeModifier = s.TimeModifier or o.TimeModifier or default.TimeModifier,
-        MaxDistance = s.MaxDistance or o.MaxDistance or default.MaxDistance,
-    }
-    return new
+	o = o or {}
+	s = s or default
+	local new = {
+		WaveLength = s.WaveLength or o.WaveLength or default.WaveLength,
+		Gravity = s.Gravity or o.Gravity or default.Gravity,
+		Direction = s.Direction or o.Direction or default.Direction,
+		PushPoint = s.PushPoint or o.PushPoint or default.PushPoint,
+		Steepness = s.Steepness or o.Steepness or default.Steepness,
+		TimeModifier = s.TimeModifier or o.TimeModifier or default.TimeModifier,
+		MaxDistance = s.MaxDistance or o.MaxDistance or default.MaxDistance,
+	}
+	return new
 end
 
 -- Determines if a point lies within a triangle using barycentric coordinates, used to track wave height influence areas
 function isPointInTriangle(f, a, b, c)
-    local v0 = c - a
-    local v1 = b - a
-    local v2 = f - a
+	local v0 = c - a
+	local v1 = b - a
+	local v2 = f - a
 
-    local dot00 = v0:Dot(v0)
-    local dot01 = v0:Dot(v1)
-    local dot02 = v0:Dot(v2)
-    local dot11 = v1:Dot(v1)
-    local dot12 = v1:Dot(v2)
+	local dot00 = v0:Dot(v0)
+	local dot01 = v0:Dot(v1)
+	local dot02 = v0:Dot(v2)
+	local dot11 = v1:Dot(v1)
+	local dot12 = v1:Dot(v2)
 
-    local invDenom = 1 / (dot00 * dot11 - dot01 * dot01)
-    local u = (dot11 * dot02 - dot01 * dot12) * invDenom
-    local v = (dot00 * dot12 - dot01 * dot02) * invDenom
+	local invDenom = 1 / (dot00 * dot11 - dot01 * dot01)
+	local u = (dot11 * dot02 - dot01 * dot12) * invDenom
+	local v = (dot00 * dot12 - dot01 * dot02) * invDenom
 
-    return (u >= 0) and (v >= 0) and (u + v <= 1)
+	return (u >= 0) and (v >= 0) and (u + v <= 1)
 end
 
 -- Calculates direction for wave propagation based on settings or a reference point
 local function GetDirection(Settings, WorldPos)
-    local Direction = Settings.Direction
-    local PushPoint = Settings.PushPoint
+	local Direction = Settings.Direction
+	local PushPoint = Settings.PushPoint
 
-    if PushPoint then
-        local PartPos = PushPoint:IsA("Attachment") and PushPoint.WorldPosition or PushPoint.Position
-        if PartPos then
-            Direction = (PartPos - WorldPos).Unit
-            Direction = Vector2.new(Direction.X, Direction.Z)
-        else
-            warn("Invalid class for FollowPart, must be BasePart or Attachment")
-            return
-        end
-    end
-    return Direction
+	if PushPoint then
+		local PartPos = PushPoint:IsA("Attachment") and PushPoint.WorldPosition or PushPoint.Position
+		if PartPos then
+			Direction = (PartPos - WorldPos).Unit
+			Direction = Vector2.new(Direction.X, Direction.Z)
+		else
+			warn("Invalid class for FollowPart, must be BasePart or Attachment")
+			return
+		end
+	end
+	return Direction
 end
 
--- Creates a debug visualizer for wave tracking
-local CreateMiscVisual = function()
-    local p = Instance.new("Part")
-    p.Anchored = true
-    p.Name = "Visualizer"
-    p.Size = Vector3.new(5, 5, 5)
-    p.Color = Color3.fromRGB(255, 0, 0)
-    p.Material = Enum.Material.Neon
-    p.CanCollide = false
-    p.Parent = workspace
-    return p
+local BoneLocations = {}
+local XZVector3 = function(Vector: Vector3)
+	return Vector3.new(Vector.X, 0, Vector.Z)
 end
+local ConvertToVector2 = function(Vector: Vector3)
+	return Vector2.new(Vector.X, Vector.Z);
+end
+
+local ConvertToVector3 = function(Vector: Vector2)
+	return Vector3.new(Vector.X, 0, Vector.Y);
+end
+
+local RowCount = 21;
+local GetColumnRange = function(Position: Vector3) -- As gridified, the index becomes a decimal. math.floor and math.ceil will return two indexes the point is between.
+	local X = Position.X + 1000;
+	local RowAbsolute = (X / 2000) * RowCount;
+
+	local Row0 = math.floor(RowAbsolute) + 1;
+	local Row1 = math.ceil(RowAbsolute) + 1;
+
+	return Row0, Row1
+end
+
+local GetRowRange = function(Position: Vector3) -- As gridified, the index becomes a decimal. math.floor and math.ceil will return two indexes the point is between.
+	local Z = Position.Z + 1000;
+	local RowAbsolute = (Z / 2000) * RowCount;
+
+	local Row0 = math.floor(RowAbsolute) + 1;
+	local Row1 = math.ceil(RowAbsolute) + 1;
+
+	return Row0, Row1
+end
+
+local DistanceBetweenBones = 2000 / 21;
+local GetXPlacement = function(Position: Vector3)
+	local X = Position.X / DistanceBetweenBones -- As gridified, the index becomes a decimal. math.floor and math.ceil will return two indexes the point is between.
+	return math.floor(X), math.ceil(X);
+end
+
+local GetZPlacement = function(Position: Vector3)
+	local Z = Position.Z / DistanceBetweenBones -- As gridified, the index becomes a decimal. math.floor and math.ceil will return two indexes the point is between.
+	return math.floor(Z), math.ceil(Z);
+end
+
+local OffsetCount = 11.5;
 
 -- The main function for calculating wave height using bone positions and Gerstner wave calculations
 function Wave.GetWaveHeight(self, Position: Vector3, Settings)
@@ -191,21 +224,31 @@ function Wave.GetWaveHeight(self, Position: Vector3, Settings)
 		-- Convert position to 2D XZ plane and set up variables
 		Position = XZVector3(Position)
 		local Direction = Settings.Direction
-		local PointF = ConvertToVector2(Position)
+		local PointF = ConvertToVector2(Position) -- Since the gridify, uses vector2 for simple.
 		local Triangle
 		local Grid = self._bones_grid
-		local Offset = Position - self._instance.Position
+		local Offset = Position - self._instance.Position -- get the offseted, so no matter where the position of the mesh block is, we still get a range from (0-2000)
 		
+		
+		-- this is used so we can start gridifying, therefore, we can zone out two triangles the point are in. After that, height sampling between these two triangles are used to 
+		-- calculate the wave height at a certain posiition.
+		
+
 		-- Calculate row and column range in the bone grid
-		local Row0, Row1 = GetRowRange(Offset)
-		local Column0, Column1 = GetColumnRange(Offset)
+		local Row0, Row1 = GetRowRange(Offset) -- turning 999 to (9, 10), which is the two bones are point is between
+		local Column0, Column1 = GetColumnRange(Offset) -- turning 999 to (9, 10), which is the two bones are point is between
 
 		-- Return if row/column ranges are not defined
 		if not Row0 or not Row1 or not Column0 or not Column1 then return end
 
 		-- Retrieve grid-based bone information and define triangles for wave height calculations
-		local bone1, bone2, bone3, bone4 = Grid[Row0][Column0], Grid[Row0][Column1], Grid[Row1][Column0], Grid[Row1][Column1]
-		local triangles = {{bone1, bone2, bone3}, {bone2, bone3, bone4}}
+		
+		-- with 2 start-end row and 2 start-end ccolumns, we can make a combination of 4 different bone indexs. These are 4 points of the bone square the  position is in.
+		
+		local bone1, bone2, bone3, bone4 = Grid[Row0][Column0], Grid[Row0][Column1], Grid[Row1][Column0], Grid[Row1][Column1]  -- Get four nearest bones, drawing a square then turn into 2 triangles.
+		local triangles = {{bone1, bone2, bone3}, {bone2, bone3, bone4}} -- define two triangles the position is getting affected by.
+		
+		---- Trianglation process is because mesh deformation are vertexes.
 
 		-- Convert triangle vertices to 2D vectors and determine if PointF lies within triangle 1 or triangle 2
 		local PointA, PointB, PointC = ConvertToVector2(triangles[1][1].WorldPosition), ConvertToVector2(triangles[1][2].WorldPosition), ConvertToVector2(triangles[1][3].WorldPosition)
@@ -213,15 +256,22 @@ function Wave.GetWaveHeight(self, Position: Vector3, Settings)
 
 		-- Project the position onto the plane formed by the triangle and return the result
 		local r1 = ProjectToPlane(Position, Triangle[1].TransformedWorldCFrame.Position, Triangle[2].TransformedWorldCFrame.Position, Triangle[3].TransformedWorldCFrame.Position)
+		
+		-- the reason for this is because a position will get affected by 3 different bones, which create a triangle (after math sampling). we can sample the wave height by getting the
+		-- triangle steepness at a certain point, lying on that triangle.
+		
+		-- this process is translated and processed from this original post: https://devforum.roblox.com/t/sampling-gerstner-wave-position-between-two-bones/1801988/5
+		-- it was explained, and I built the code myself using the principles.
+		
 		return r1
 	end)
 
-	-- Fallback: If the first attempt fails, calculate an approximate height using Gerstner wave sampling
+	-- Fallback: If the first attempt fails, calculate an approximate height using Gerstner wave sampling, may not the correct
 	if sc then return rt else
-		local XMin, XMax, ZMin, ZMax = GetXPlacement(Position), GetZPlacement(Position)
+		local XMin, XMax, ZMin, ZMax = GetXPlacement(Position), GetZPlacement(Position) --  Gridify process, simply turning from (1550, 0, 1550) to 
 		local X, Z = XMax * DistanceBetweenBones, ZMax * DistanceBetweenBones
 		local NewPosition = Vector3.new(X, 0, Z)
-		
+
 		-- Compute offset and retrieve rows/columns for bone grid adjustment
 		local Offset = Position - NewPosition
 		local Row0, Row1, Column0, Column1 = GetRowRange(Offset), GetColumnRange(Offset)
@@ -233,7 +283,7 @@ function Wave.GetWaveHeight(self, Position: Vector3, Settings)
 		local bone3 = Vector3.new((Column1 - OffsetCount) * DistanceBetweenBones, 0, (Row0 - OffsetCount) * DistanceBetweenBones) + NewPosition
 		local bone4 = Vector3.new((Column1 - OffsetCount) * DistanceBetweenBones, 0, (Row1 - OffsetCount) * DistanceBetweenBones) + NewPosition
 		local triangles = {{bone1, bone2, bone3}, {bone2, bone3, bone4}}
-		
+
 		-- Determine the triangle that contains PointF and calculate Gerstner wave transformations
 		local PointA, PointB, PointC = ConvertToVector2(bone1), ConvertToVector2(bone2), ConvertToVector2(bone3)
 		Triangle = isPointInTriangle(PointF, PointA, PointB, PointC) and triangles[1] or triangles[2]
@@ -295,7 +345,7 @@ end
 function Wave:Update()
 	for _, v in pairs(self._bones) do
 		-- Determine wave direction, applying Perlin noise if no specific direction is set in settings
-		local WorldPos, Settings, Direction = v.WorldPosition, self._settings, Settings.Direction
+		local WorldPos, Settings, Direction = v.WorldPosition, self._settings, self._settings.Direction
 		if Direction == EmptyVector2 then
 			local Noise = self._noise[v]
 			local NoiseX, NoiseZ = Noise and Noise.X or math_noise(WorldPos.X / 3, WorldPos.Z / 3, 1), Noise and Noise.Z or math_noise(WorldPos.X / 3, WorldPos.Z / 3, 0)
@@ -329,7 +379,7 @@ function Wave:ConnectRenderStepped()
 		local Character, Settings = Player.Character, self._settings
 		pcall(function()
 			local InBoundsRange = (Character.PrimaryPart.Position - self._instance.Position).Magnitude < Settings.MaxDistance or 
-								  (workspace.CurrentCamera.CFrame.Position - self._instance.Position).Magnitude < Settings.MaxDistance
+				(workspace.CurrentCamera.CFrame.Position - self._instance.Position).Magnitude < Settings.MaxDistance
 			self._time = InBoundsRange and (DateTime.now().UnixTimestampMillis / 1000) / Settings.TimeModifier or self:Refresh()
 		end)
 	end)
