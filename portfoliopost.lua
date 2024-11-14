@@ -50,13 +50,10 @@ local newCFrame = CFrame.new
 local IdentityCFrame = newCFrame() -- Identity matrix for transformations reset
 local EmptyVector2 = Vector2.new()
 local math_noise = math.noise
-local random = math.random
-local setseed = math.randomseed
 local TAU = 2 * math.pi -- Constant for better readability and performance
 
 -- Services for game components
 local Stepped = game:GetService("RunService").RenderStepped
-local Player = game:GetService("Players").LocalPlayer
 
 -- Sea data from shared module, containing sea level and wave settings
 local SeaData = require(game.ReplicatedStorage.MODULES.Sea)
@@ -70,6 +67,7 @@ local default = {
 	Steepness = 1,                -- Steepness factor affecting wave height
 	TimeModifier = 4,             -- Speed of wave animation over time
 	MaxDistance = 1500,           -- Max effective distance for waves
+	PushPoint = Vector3.zero
 }
 
 -- Projects a vector vertically to simulate wave height impact on the y-axis
@@ -119,7 +117,7 @@ local function Gerstner(Position: Vector3, Wavelength: number, Direction: Vector
 end
 
 -- Combines default and custom settings to create a new settings table
-local function CreateSettings(s: table, o: table)
+local function CreateSettings(s, o)
 	o = o or {}
 	s = s or default
 	local new = {
@@ -179,10 +177,6 @@ local ConvertToVector2 = function(Vector: Vector3)
 	return Vector2.new(Vector.X, Vector.Z);
 end
 
-local ConvertToVector3 = function(Vector: Vector2)
-	return Vector3.new(Vector.X, 0, Vector.Y);
-end
-
 local RowCount = 21;
 local GetColumnRange = function(Position: Vector3) -- As gridified, the index becomes a decimal. math.floor and math.ceil will return two indexes the point is between.
 	local X = Position.X + 1000;
@@ -220,88 +214,52 @@ local OffsetCount = 11.5;
 -- The main function for calculating wave height using bone positions and Gerstner wave calculations
 function Wave.GetWaveHeight(self, Position: Vector3, Settings)
 	-- Attempt to find the height of the wave at a specific position and apply wave transformations
-	local sc, rt = pcall(function()
-		-- Convert position to 2D XZ plane and set up variables
-		Position = XZVector3(Position)
-		local Direction = Settings.Direction
-		local PointF = ConvertToVector2(Position) -- Since the gridify, uses vector2 for simple.
-		local Triangle
-		local Grid = self._bones_grid
-		local Offset = Position - self._instance.Position -- get the offseted, so no matter where the position of the mesh block is, we still get a range from (0-2000)
-		
-		
-		-- this is used so we can start gridifying, therefore, we can zone out two triangles the point are in. After that, height sampling between these two triangles are used to 
-		-- calculate the wave height at a certain posiition.
-		
+	Position = XZVector3(Position)
+	local Direction = Settings.Direction
+	local PointF = ConvertToVector2(Position) -- Since the gridify, uses vector2 for simple.
+	local Triangle
+	local Grid = self._bones_grid
+	local Offset = Position - self._instance.Position -- get the offseted, so no matter where the position of the mesh block is, we still get a range from (0-2000)
 
-		-- Calculate row and column range in the bone grid
-		local Row0, Row1 = GetRowRange(Offset) -- turning 999 to (9, 10), which is the two bones are point is between
-		local Column0, Column1 = GetColumnRange(Offset) -- turning 999 to (9, 10), which is the two bones are point is between
 
-		-- Return if row/column ranges are not defined
-		if not Row0 or not Row1 or not Column0 or not Column1 then return end
+	-- this is used so we can start gridifying, therefore, we can zone out two triangles the point are in. After that, height sampling between these two triangles are used to 
+	-- calculate the wave height at a certain posiition.
 
-		-- Retrieve grid-based bone information and define triangles for wave height calculations
-		
-		-- with 2 start-end row and 2 start-end ccolumns, we can make a combination of 4 different bone indexs. These are 4 points of the bone square the  position is in.
-		
-		local bone1, bone2, bone3, bone4 = Grid[Row0][Column0], Grid[Row0][Column1], Grid[Row1][Column0], Grid[Row1][Column1]  -- Get four nearest bones, drawing a square then turn into 2 triangles.
-		local triangles = {{bone1, bone2, bone3}, {bone2, bone3, bone4}} -- define two triangles the position is getting affected by.
-		
-		---- Trianglation process is because mesh deformation are vertexes.
 
-		-- Convert triangle vertices to 2D vectors and determine if PointF lies within triangle 1 or triangle 2
-		local PointA, PointB, PointC = ConvertToVector2(triangles[1][1].WorldPosition), ConvertToVector2(triangles[1][2].WorldPosition), ConvertToVector2(triangles[1][3].WorldPosition)
-		Triangle = isPointInTriangle(PointF, PointA, PointB, PointC) and triangles[1] or triangles[2]
+	-- Calculate row and column range in the bone grid
+	local Row0, Row1 = GetRowRange(Offset) -- turning 999 to (9, 10), which is the two bones are point is between
+	local Column0, Column1 = GetColumnRange(Offset) -- turning 999 to (9, 10), which is the two bones are point is between
 
-		-- Project the position onto the plane formed by the triangle and return the result
-		local r1 = ProjectToPlane(Position, Triangle[1].TransformedWorldCFrame.Position, Triangle[2].TransformedWorldCFrame.Position, Triangle[3].TransformedWorldCFrame.Position)
-		
-		-- the reason for this is because a position will get affected by 3 different bones, which create a triangle (after math sampling). we can sample the wave height by getting the
-		-- triangle steepness at a certain point, lying on that triangle.
-		
-		-- this process is translated and processed from this original post: https://devforum.roblox.com/t/sampling-gerstner-wave-position-between-two-bones/1801988/5
-		-- it was explained, and I built the code myself using the principles.
-		
-		return r1
-	end)
+	-- Return if row/column ranges are not defined
+	if not Row0 or not Row1 or not Column0 or not Column1 then return SeaData.FixedSeaLevel end
 
-	-- Fallback: If the first attempt fails, calculate an approximate height using Gerstner wave sampling, may not the correct
-	if sc then return rt else
-		local XMin, XMax, ZMin, ZMax = GetXPlacement(Position), GetZPlacement(Position) --  Gridify process, simply turning from (1550, 0, 1550) to 
-		local X, Z = XMax * DistanceBetweenBones, ZMax * DistanceBetweenBones
-		local NewPosition = Vector3.new(X, 0, Z)
+	-- Retrieve grid-based bone information and define triangles for wave height calculations
 
-		-- Compute offset and retrieve rows/columns for bone grid adjustment
-		local Offset = Position - NewPosition
-		local Row0, Row1, Column0, Column1 = GetRowRange(Offset), GetColumnRange(Offset)
-		local PointF, Triangle = ConvertToVector2(Position)
+	-- with 2 start-end row and 2 start-end ccolumns, we can make a combination of 4 different bone indexs. These are 4 points of the bone square the  position is in.
 
-		-- Calculate bones based on grid offset and distance between bones
-		local bone1 = Vector3.new((Column0 - OffsetCount) * DistanceBetweenBones, 0, (Row0 - OffsetCount) * DistanceBetweenBones) + NewPosition
-		local bone2 = Vector3.new((Column0 - OffsetCount) * DistanceBetweenBones, 0, (Row1 - OffsetCount) * DistanceBetweenBones) + NewPosition
-		local bone3 = Vector3.new((Column1 - OffsetCount) * DistanceBetweenBones, 0, (Row0 - OffsetCount) * DistanceBetweenBones) + NewPosition
-		local bone4 = Vector3.new((Column1 - OffsetCount) * DistanceBetweenBones, 0, (Row1 - OffsetCount) * DistanceBetweenBones) + NewPosition
-		local triangles = {{bone1, bone2, bone3}, {bone2, bone3, bone4}}
+	local bone1, bone2, bone3, bone4 = Grid[Row0][Column0], Grid[Row0][Column1], Grid[Row1][Column0], Grid[Row1][Column1]  -- Get four nearest bones, drawing a square then turn into 2 triangles.
+	local triangles = {{bone1, bone2, bone3}, {bone2, bone3, bone4}} -- define two triangles the position is getting affected by.
 
-		-- Determine the triangle that contains PointF and calculate Gerstner wave transformations
-		local PointA, PointB, PointC = ConvertToVector2(bone1), ConvertToVector2(bone2), ConvertToVector2(bone3)
-		Triangle = isPointInTriangle(PointF, PointA, PointB, PointC) and triangles[1] or triangles[2]
+	---- Trianglation process is because mesh deformation are vertexes.
 
-		-- Apply Gerstner wave transformations for each point in the triangle
-		local _time = (DateTime.now().UnixTimestampMillis / 1000) / Settings.TimeModifier
-		local Transform1 = Gerstner(Triangle[1], Settings.WaveLength, Settings.Direction, Settings.Steepness, Settings.Gravity, _time) + Vector3.new(0, SeaData.SeaLevel, 0) + Triangle[1]
-		local Transform2 = Gerstner(Triangle[2], Settings.WaveLength, Settings.Direction, Settings.Steepness, Settings.Gravity, _time) + Vector3.new(0, SeaData.SeaLevel, 0) + Triangle[2]
-		local Transform3 = Gerstner(Triangle[3], Settings.WaveLength, Settings.Direction, Settings.Steepness, Settings.Gravity, _time) + Vector3.new(0, SeaData.SeaLevel, 0) + Triangle[3]
+	-- Convert triangle vertices to 2D vectors and determine if PointF lies within triangle 1 or triangle 2
+	local PointA, PointB, PointC = ConvertToVector2(triangles[1][1].WorldPosition), ConvertToVector2(triangles[1][2].WorldPosition), ConvertToVector2(triangles[1][3].WorldPosition)
+	Triangle = isPointInTriangle(PointF, PointA, PointB, PointC) and triangles[1] or triangles[2]
 
-		-- Project the position onto the transformed plane and return the height result
-		local r1 = ProjectToPlane(Position, Transform1, Transform2, Transform3)
-		return r1
-	end
+	-- Project the position onto the plane formed by the triangle and return the result
+	local r1 = ProjectToPlane(Position, Triangle[1].TransformedWorldCFrame.Position, Triangle[2].TransformedWorldCFrame.Position, Triangle[3].TransformedWorldCFrame.Position)
+
+	-- the reason for this is because a position will get affected by 3 different bones, which create a triangle (after math sampling). we can sample the wave height by getting the
+	-- triangle steepness at a certain point, lying on that triangle.
+
+	-- this process is translated and processed from this original post: https://devforum.roblox.com/t/sampling-gerstner-wave-position-between-two-bones/1801988/5
+	-- it was explained, and I built the code myself using the principles.
+
+	return r1
 end
 
 -- Initializes a new Wave object with given instance, settings, and bones (wave control points)
-function Wave.new(instance: instance, waveSettings: table | nil, bones: table | nil)
+function Wave.new(instance: Instance, waveSettings, bones: { Instance } | nil)
 	-- Sets up bones and grid representation for wave mechanics; if no bones are provided, retrieve them from instance
 	if not bones then
 		bones = {}
@@ -311,22 +269,7 @@ function Wave.new(instance: instance, waveSettings: table | nil, bones: table | 
 	end
 
 	-- Create grid for bones and define triangles for wave calculations
-	local Time, triangles, boneGrids = os.time(), {}, Gridify(bones, 22)
-	for i, row in pairs(boneGrids) do
-		local nextRow = boneGrids[i + 1]
-		if not nextRow then continue end
-		for i1, bone in pairs(row) do
-			local nextBone = row[i1 + 1]
-			if not nextBone then continue end
-
-			-- Create triangles for wave height calculation
-			local corner1, corner2, corner3, corner4 = row[i1], row[i1 + 1], boneGrids[i + 1][i1], boneGrids[i + 1][i1 + 1]
-			if corner1 and corner2 and corner3 and corner4 then
-				table.insert(triangles, {corner1, corner3, corner4})
-				table.insert(triangles, {corner2, corner1, corner4})
-			end
-		end
-	end
+	local Time, boneGrids = os.time(), Gridify(bones, 22)
 
 	-- Return new Wave instance
 	return setmetatable({
@@ -336,7 +279,6 @@ function Wave.new(instance: instance, waveSettings: table | nil, bones: table | 
 		_connections = {},
 		_noise = {},
 		_bones_grid = boneGrids,
-		_triangles = triangles,
 		_settings = CreateSettings(waveSettings)
 	}, Wave)
 end
@@ -373,6 +315,7 @@ function Wave:UpdateSettings(waveSettings)
 end
 
 -- Connects wave update to the rendering loop to maintain smooth updates based on player distance
+local Player = game:GetService("Players").LocalPlayer
 function Wave:ConnectRenderStepped()
 	local Connection = Stepped:Connect(function()
 		if not game:IsLoaded() then return end
@@ -390,7 +333,7 @@ end
 -- Disconnects and clears wave data, making it unusable
 function Wave:Destroy()
 	self._instance, self._bones, self._settings, self = nil, {}, {}, nil
-	for _, v in pairs(self._connections) do pcall(function() v:Disconnect() end) end
+	for _, v in pairs(self._connections) do v:Disconnect() end
 end
 
 return Wave
