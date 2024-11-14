@@ -1,3 +1,5 @@
+--nutella
+
 --|| OriChanRBLX's Wave Module - A portfolio piece demonstrating Gerstner wave simulation on deformed mesh bones to create a custom ocean ||--
 -- This script uses the Gerstner wave formula on bones to simulate ocean movement. Core functionality includes calculating wave height by sampling triangles and nearby bones.
 
