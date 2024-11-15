@@ -69,7 +69,6 @@ local default = {
 	Steepness = 1,                -- Steepness factor affecting wave height
 	TimeModifier = 4,             -- Speed of wave animation over time
 	MaxDistance = 1500,           -- Max effective distance for waves
-	PushPoint = Vector3.zero
 }
 
 -- Projects a vector vertically to simulate wave height impact on the y-axis
@@ -104,11 +103,23 @@ end
 
 -- Gerstner wave formula to create realistic wave displacement on the mesh
 local function Gerstner(Position: Vector3, Wavelength: number, Direction: Vector2, Steepness: number, Gravity: number, Time: number)
+	if not Time then
+		return Position
+	end
+	
 	local k = TAU / Wavelength            -- Wave number, relates to wave length
 	local a = Steepness / k               -- Wave amplitude based on steepness
 	local d = Direction.Unit              -- Normalized direction vector for consistency
 	local c = math.sqrt(Gravity / k)      -- Wave speed derived from gravity and wave number
-	local f = k * d:Dot(Vector2.new(Position.X, Position.Z)) - c * Time
+	local dotvector = d:Dot(Vector2.new(Position.X, Position.Z))
+	if not dotvector then
+		return Position
+	end
+	if not k then
+		return Position
+	end
+	
+	local f = k * dotvector - c * Time
 	local cosF = math.cos(f)
 
 	-- Displacement vectors for wave movement in 3D space
@@ -327,6 +338,8 @@ function Wave:ConnectRenderStepped()
 				(workspace.CurrentCamera.CFrame.Position - self._instance.Position).Magnitude < Settings.MaxDistance
 			self._time = InBoundsRange and (DateTime.now().UnixTimestampMillis / 1000) / Settings.TimeModifier or self:Refresh()
 		end)
+		
+		self:Update()
 	end)
 	table.insert(self._connections, Connection)
 	return Connection
